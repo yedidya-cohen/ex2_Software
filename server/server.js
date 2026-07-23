@@ -27,6 +27,7 @@ const menu = {
 };
 
 const orders = [];
+const validOrderStatuses = ["new", "preparing", "ready", "delivered"];
 
 app.use(cors());
 app.use(express.json());
@@ -188,6 +189,30 @@ app.post("/api/orders", (req, res) => {
   orders.push(order);
 
   return res.status(201).json(order);
+});
+
+app.get("/api/orders", (req, res) => {
+  const { status } = req.query;
+
+  if (status === undefined) {
+    return res.json(orders);
+  }
+
+  if (!validOrderStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid order status" });
+  }
+
+  return res.json(orders.filter((order) => order.status === status));
+});
+
+app.get("/api/orders/:id", (req, res) => {
+  const order = orders.find((storedOrder) => storedOrder.id === req.params.id);
+
+  if (!order) {
+    return res.status(404).json({ error: "Order not found" });
+  }
+
+  return res.json(order);
 });
 
 app.use((error, req, res, next) => {
