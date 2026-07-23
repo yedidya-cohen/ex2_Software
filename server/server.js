@@ -28,6 +28,11 @@ const menu = {
 
 const orders = [];
 const validOrderStatuses = ["new", "preparing", "ready", "delivered"];
+const nextOrderStatus = {
+  new: "preparing",
+  preparing: "ready",
+  ready: "delivered",
+};
 
 app.use(cors());
 app.use(express.json());
@@ -211,6 +216,42 @@ app.get("/api/orders/:id", (req, res) => {
   if (!order) {
     return res.status(404).json({ error: "Order not found" });
   }
+
+  return res.json(order);
+});
+
+app.patch("/api/orders/:id/status", (req, res) => {
+  if (
+    req.body === null ||
+    typeof req.body !== "object" ||
+    Array.isArray(req.body)
+  ) {
+    return res.status(400).json({ error: "Request body must be a JSON object" });
+  }
+
+  const { status } = req.body;
+
+  if (status === undefined) {
+    return res.status(400).json({ error: "Status is required" });
+  }
+
+  if (!validOrderStatuses.includes(status)) {
+    return res.status(400).json({ error: "Invalid order status" });
+  }
+
+  const order = orders.find((storedOrder) => storedOrder.id === req.params.id);
+
+  if (!order) {
+    return res.status(404).json({ error: "Order not found" });
+  }
+
+  if (nextOrderStatus[order.status] !== status) {
+    return res.status(409).json({
+      error: `Illegal status transition from ${order.status} to ${status}`,
+    });
+  }
+
+  order.status = status;
 
   return res.json(order);
 });
