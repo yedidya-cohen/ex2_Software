@@ -15,6 +15,18 @@ function App() {
   const [selectedToppingIds, setSelectedToppingIds] = useState([]);
   const [selectionMessage, setSelectionMessage] = useState("");
   const [cart, setCart] = useState([]);
+  const [customerDetails, setCustomerDetails] = useState({
+    customerName: "",
+    phone: "",
+    deliveryAddress: "",
+  });
+  const [checkoutError, setCheckoutError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [orderConfirmation, setOrderConfirmation] = useState(null);
+  const [lookupId, setLookupId] = useState("");
+  const [lookupError, setLookupError] = useState("");
+  const [lookupResult, setLookupResult] = useState(null);
+  const [isLookingUp, setIsLookingUp] = useState(false);
 
   useEffect(() => {
     async function loadMenu() {
@@ -63,6 +75,13 @@ function App() {
     () => cart.reduce((sum, item) => sum + item.itemPrice, 0),
     [cart],
   );
+
+  const checkoutDisabled =
+    cart.length === 0 ||
+    !customerDetails.customerName.trim() ||
+    !customerDetails.phone.trim() ||
+    !customerDetails.deliveryAddress.trim() ||
+    isSubmitting;
 
   function handlePizzaChange(pizzaId) {
     setSelectedPizzaId(pizzaId);
@@ -122,12 +141,117 @@ function App() {
     setCart((currentCart) => [...currentCart, cartItem]);
     setSelectedToppingIds([]);
     setSelectionMessage(`${selectedPizza.name} was added to the cart.`);
+    setOrderConfirmation(null);
+    setCheckoutError("");
   }
 
   function removeCartItem(itemId) {
     setCart((currentCart) =>
       currentCart.filter((item) => item.id !== itemId),
     );
+  }
+
+  function handleCustomerDetailChange(event) {
+    const { name, value } = event.target;
+
+    setCustomerDetails((currentDetails) => ({
+      ...currentDetails,
+      [name]: value,
+    }));
+  }
+
+  async function submitOrder(event) {
+    event.preventDefault();
+
+    if (checkoutDisabled) {
+      return;
+    }
+
+    setCheckoutError("");
+    setIsSubmitting(true);
+
+    const orderRequest = {
+      customerName: customerDetails.customerName,
+      phone: customerDetails.phone,
+      deliveryAddress: customerDetails.deliveryAddress,
+      pizzas: cart.map((item) => ({
+        pizzaId: item.pizzaId,
+        sizeId: item.sizeId,
+        toppings: item.toppings.map((topping) => topping.id),
+      })),
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(orderRequest),
+      });
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData.error || "The order could not be created");
+      }
+
+      setOrderConfirmation(responseData);
+      setCart([]);
+      setCustomerDetails({
+        customerName: "",
+        phone: "",
+        deliveryAddress: "",
+      });
+    } catch (error) {
+      setCheckoutError(
+        error instanceof TypeError
+          ? "Could not connect to the server. Please try again."
+          : error.message,
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function findOrder(event) {
+    event.preventDefault();
+
+    const trimmedOrderId = lookupId.trim();
+
+    if (!trimmedOrderId) {
+      setLookupResult(null);
+      setLookupError("Enter an order ID");
+      return;
+    }
+
+    setLookupError("");
+    setLookupResult(null);
+    setIsLookingUp(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/orders/${encodeURIComponent(trimmedOrderId)}`,
+      );
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          response.status === 404
+            ? "Order not found"
+            : responseData.error || "The order could not be loaded",
+        );
+      }
+
+      setLookupResult(responseData);
+    } catch (error) {
+      setLookupError(
+        error instanceof TypeError
+          ? "Could not connect to the server. Please try again."
+          : error.message,
+      );
+    } finally {
+      setIsLookingUp(false);
+    }
   }
 
   return (
@@ -312,9 +436,153 @@ function App() {
             <p className="summary-note">
               The server will calculate the final price at checkout.
             </p>
+
+            <form className="checkout-form" onSubmit={submitOrder}>
+              <div className="checkout-heading">
+                <p className="step-label">Step 3</p>
+                <h2>Delivery details</h2>
+              </div>
+
+              <label className="input-field">
+                <span>Customer name</span>
+                <input
+                  autoComplete="name"
+                  name="customerName"
+                  onChange={handleCustomerDetailChange}
+                  placeholder="Your full name"
+                  type="text"
+                  value={customerDetails.customerName}
+                />
+              </label>
+
+              <label className="input-field">
+                <span>Phone</span>
+                <input
+                  autoComplete="tel"
+                  name="phone"
+                  onChange={handleCustomerDetailChange}
+                  placeholder="050-0000000"
+                  type="tel"
+                  value={customerDetails.phone}
+                />
+              </label>
+
+              <label className="input-field">
+                <span>Delivery address</span>
+                <textarea
+                  autoComplete="street-address"
+                  name="deliveryAddress"
+                  onChange={handleCustomerDetailChange}
+                  placeholder="Street, number, and city"
+                  rows="3"
+                  value={customerDetails.deliveryAddress}
+                />
+              </label>
+
+              {checkoutError && (
+                <p className="form-error" role="alert">
+                  {checkoutError}
+                </p>
+              )}
+
+              <button
+                className="primary-button checkout-button"
+                data-testid="checkout-button"
+                disabled={checkoutDisabled}
+                type="submit"
+              >
+                {isSubmitting
+                  ? "Creating order..."
+                  : `Simulate payment and order · ${formatPrice(cartTotal)}`}
+              </button>
+            </form>
+
+            {orderConfirmation && (
+              <section
+                className="order-confirmation"
+                data-testid="order-confirmation"
+              >
+                <p className="confirmation-label">Order confirmed</p>
+                <h2>Thank you!</h2>
+                <dl>
+                  <div>
+                    <dt>Order ID</dt>
+                    <dd>{orderConfirmation.id}</dd>
+                  </div>
+                  <div>
+                    <dt>Final price</dt>
+                    <dd>{formatPrice(orderConfirmation.totalPrice)}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd className="status-badge">
+                      {orderConfirmation.status}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            )}
           </aside>
         </div>
       )}
+
+      <section className="tracking-panel">
+        <div>
+          <p className="eyebrow">Already ordered?</p>
+          <h2>Track an order</h2>
+          <p className="tracking-intro">
+            Enter the order ID from your confirmation to see its current
+            status.
+          </p>
+        </div>
+
+        <form className="tracking-form" onSubmit={findOrder}>
+          <label className="input-field" htmlFor="order-lookup-id">
+            <span>Order ID</span>
+            <input
+              id="order-lookup-id"
+              onChange={(event) => setLookupId(event.target.value)}
+              placeholder="Paste an order ID"
+              type="text"
+              value={lookupId}
+            />
+          </label>
+          <button
+            className="secondary-button"
+            disabled={isLookingUp}
+            type="submit"
+          >
+            {isLookingUp ? "Searching..." : "Find order"}
+          </button>
+        </form>
+
+        {lookupError && (
+          <p className="form-error lookup-message" role="alert">
+            {lookupError}
+          </p>
+        )}
+
+        {lookupResult && (
+          <article className="lookup-result">
+            <div>
+              <span>Order ID</span>
+              <strong>{lookupResult.id}</strong>
+            </div>
+            <div>
+              <span>Customer</span>
+              <strong>{lookupResult.customerName}</strong>
+            </div>
+            <div>
+              <span>Total</span>
+              <strong>{formatPrice(lookupResult.totalPrice)}</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong className="status-badge">{lookupResult.status}</strong>
+            </div>
+          </article>
+        )}
+      </section>
     </main>
   );
 }
